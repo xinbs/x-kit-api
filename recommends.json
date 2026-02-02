@@ -1,0 +1,138 @@
+{
+  "description": "推荐关注的博主列表，涵盖技术开发、AI、创业、设计等领域",
+  "accounts": [
+    {
+      "username": "ruanyf",
+      "name": "阮一峰",
+      "description": "知名技术博主",
+      "tags": ["技术博主", "教育者"],
+      "id": "1580781"
+    },
+    {
+      "username": "dotey",
+      "name": "宝玉",
+      "description": "分享最新的AI资讯，分享Prompt的编写方法",
+      "tags": ["AI资讯", "Prompt编写", "AI教育"],
+      "id": "3178231"
+    },
+    {
+      "username": "yuxiyou",
+      "name": "尤雨溪",
+      "description": "Vue.js 作者",
+      "tags": ["前端开发", "Vue作者", "技术开发"],
+      "id": "427612058"
+    },
+    {
+      "username": "xushiwei",
+      "name": "许式伟",
+      "description": "七牛云CEO, Go+作者",
+      "tags": ["架构师", "CEO", "Go语言", "技术开发"],
+      "id": "2789781"
+    },
+    {
+      "username": "nishuang",
+      "name": "倪爽",
+      "description": "设计顾问，20年经验资深设计师",
+      "tags": ["设计顾问", "UX设计", "品牌设计"],
+      "id": "20588970"
+    },
+    {
+      "username": "nateleex",
+      "name": " Nate Lee",
+      "description": "创业公司CEO，B站视频博主",
+      "tags": ["创业者", "CEO", "视频博主", "AI出海"],
+      "id": "630067994"
+    },
+    {
+      "username": "appinn",
+      "name": "小众软件",
+      "description": "小众软件站长",
+      "tags": ["软件分享", "内容创作"],
+      "id": "16044147"
+    },
+    {
+      "username": "skywind3000",
+      "name": "韦易笑",
+      "description": "游戏开发者",
+      "tags": ["游戏开发", "技术开发"],
+      "id": "786479809647869952"
+    },
+    {
+      "username": "vikingmute",
+      "name": "维京人",
+      "description": "简单简历创始人",
+      "tags": ["创业者", "产品开发"],
+      "id": "296593919"
+    },
+    {
+      "username": "waylybaye",
+      "name": "baye",
+      "description": "自由程序员，熊猫吃短信创始人",
+      "tags": ["自由职业", "独立开发者"],
+      "id": "24124203"
+    },
+    {
+      "username": "yihong0618",
+      "name": "yihong",
+      "description": "喜欢王小波的开发者",
+      "tags": ["开发者", "文学爱好者"],
+      "id": "1017648622668795904"
+    },
+    {
+      "username": "goocarlos",
+      "name": "Carlos",
+      "description": "Dify.AI 开发者",
+      "tags": ["AI开发", "技术开发"],
+      "id": "14046502"
+    },
+    {
+      "username": "wong2_x",
+      "name": "wong2",
+      "description": "ChatHub.gg 作者",
+      "tags": ["独立开发", "AI工具", "产品开发"],
+      "id": "27219828"
+    },
+    {
+      "username": "cellinlab",
+      "name": "Cellinlab",
+      "description": "AI应用开发者，播客主理人",
+      "tags": ["AI开发", "播客主理人", "社群运营"],
+      "id": "1131442257675083777"
+    },
+    {
+      "username": "lencx_",
+      "name": "lencx",
+      "description": "浮之静公众号作者，Web/Rust/Tauri开发者",
+      "tags": ["Web开发", "Rust开发", "内容创作"],
+      "id": "820285264819933184"
+    },
+    {
+      "username": "s1ntone",
+      "name": "Sintone",
+      "description": "macOS独立开发者，CleanClip作者",
+      "tags": ["macOS开发", "独立开发", "效率工具"],
+      "id": "1640604020766298113"
+    },
+    {
+      "username": "yuyy614893671",
+      "name": "金融汪",
+      "description": "金融市场老兵，观察和理解世界",
+      "tags": ["金融投资", "市场分析"],
+      "id": "1597654998971604992"
+    },
+    {
+      "username": "daiming_cn",
+      "name": "戴铭",
+      "description": "iOS/macOS Swift开发者，技术作者",
+      "tags": ["iOS开发", "技术作者", "Swift开发"],
+      "id": "1402449532810502150"
+    },
+    {
+      "username": "chuckchen_zh",
+      "name": "Chuck Chen",
+      "description": "AI构建者，前B轮初创CXO",
+      "tags": ["AI开发", "创业者", "技术管理"],
+      "id": "1691015659818467328"
+    }
+  ]
+}

@@ -64,8 +64,110 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000);
 
+// 加载推荐博主配置
+const loadRecommends = async () => {
+  try {
+    const file = Bun.file("./recommends.json");
+    const text = await file.text();
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Failed to load recommends.json:", error);
+    return { accounts: [] };
+  }
+};
+
 // 健康检查
 app.get("/health", (c) => c.json({ status: "ok", time: new Date().toISOString() }));
+
+// 获取推荐博主列表
+app.get("/api/recommends", async (c) => {
+  try {
+    const data = await loadRecommends();
+    return c.json({
+      success: true,
+      count: data.accounts?.length || 0,
+      description: data.description,
+      data: data.accounts || [],
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 获取推荐博主的最新推文 - 频率限制：每分钟最多10次
+app.get("/api/recommends/tweets", rateLimit({ windowMs: 60 * 1000, maxRequests: 10 }), async (c) => {
+  try {
+    const count = parseInt(c.req.query("count") || "5");
+    const maxPerUser = parseInt(c.req.query("maxPerUser") || "3");
+
+    const data = await loadRecommends();
+    const accounts = data.accounts || [];
+
+    if (accounts.length === 0) {
+      return c.json({ success: false, error: "No recommended accounts found" }, 404);
+    }
+
+    const client = await xGuestClient();
+    const allTweets: any[] = [];
+
+    // 获取每个推荐博主的最新推文
+    for (const account of accounts.slice(0, count)) {
+      try {
+        const userResp = await client.getUserApi().getUserByScreenName({
+          screenName: account.username,
+        });
+
+        const userId = userResp.data.user?.restId;
+        if (!userId) continue;
+
+        const tweetsResp = await client.getTweetApi().getUserTweets({
+          userId,
+          count: maxPerUser,
+        });
+
+        const tweets = tweetsResp.data.data.map((tweet) => ({
+          id: get(tweet, "raw.result.legacy.idStr"),
+          text: get(tweet, "raw.result.legacy.fullText"),
+          createdAt: get(tweet, "raw.result.legacy.createdAt"),
+          stats: {
+            likes: get(tweet, "raw.result.legacy.favoriteCount"),
+            retweets: get(tweet, "raw.result.legacy.retweetCount"),
+            replies: get(tweet, "raw.result.legacy.replyCount"),
+          },
+          user: {
+            id: account.id,
+            username: account.username,
+            name: account.name,
+            description: account.description,
+            tags: account.tags,
+          },
+          url: `https://x.com/${account.username}/status/${get(tweet, "raw.result.legacy.idStr")}`,
+        }));
+
+        allTweets.push(...tweets);
+      } catch (e) {
+        console.log(`Failed to get tweets for ${account.username}:`, e);
+        // 继续处理下一个账号
+      }
+    }
+
+    // 按时间倒序排序
+    const sortedTweets = allTweets.sort((a, b) => {
+      const idA = a.id || "";
+      const idB = b.id || "";
+      return idB.localeCompare(idA);
+    });
+
+    return c.json({
+      success: true,
+      source: "recommended_accounts",
+      count: sortedTweets.length,
+      data: sortedTweets,
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
 
 // 获取关注列表的推文 (Timeline) - 频率限制：每分钟最多30次
 app.get("/api/timeline", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {

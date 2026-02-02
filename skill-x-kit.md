@@ -99,6 +99,57 @@ GET /api/user/{username}/tweets?count=20
 curl "http://localhost:3000/api/user/elonmusk/tweets?count=10"
 ```
 
+### 7. Get Recommended Accounts (推荐博主列表)
+```
+GET /api/recommends
+```
+获取预配置的推荐博主列表，涵盖技术开发、AI、创业、设计等领域。
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/recommends"
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "count": 19,
+  "description": "推荐关注的博主列表...",
+  "data": [
+    {
+      "username": "ruanyf",
+      "name": "阮一峰",
+      "description": "知名技术博主",
+      "tags": ["技术博主", "教育者"],
+      "id": "1580781"
+    }
+  ]
+}
+```
+
+### 8. Get Recommended Accounts' Tweets (推荐博主更新)
+```
+GET /api/recommends/tweets?count=5&maxPerUser=3
+```
+获取推荐博主的最新推文汇总。
+
+**Parameters:**
+- `count` (可选): 获取前N个博主的推文，默认5
+- `maxPerUser` (可选): 每个博主最多获取几条推文，默认3
+
+**Rate Limit:** 每分钟最多10次
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/recommends/tweets?count=10&maxPerUser=2"
+```
+
+**Features:**
+- 自动聚合多个博主的最新推文
+- 按时间倒序排序
+- 包含博主标签信息，方便分类阅读
+
 ## Response Format
 
 所有端点返回 JSON 格式：

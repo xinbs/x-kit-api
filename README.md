@@ -98,6 +98,18 @@ GET /api/user/:username
 ```
 GET /api/user/:username/tweets?count=20
 ```
+
+### 获取推荐博主列表
+```
+GET /api/recommends
+```
+返回预配置的推荐博主列表（涵盖技术开发、AI、创业、设计等领域）。
+
+### 获取推荐博主更新
+```
+GET /api/recommends/tweets?count=5&maxPerUser=3
+```
+获取推荐博主的最新推文汇总，自动聚合多个博主的内容。
 获取指定用户的最新推文。
 
 ## 获取 Auth Token

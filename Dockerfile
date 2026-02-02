@@ -12,8 +12,9 @@ COPY package.json bun.lockb* ./
 # 安装依赖
 RUN bun install --frozen-lockfile
 
-# 复制源代码
+# 复制源代码和配置文件
 COPY src ./src
+COPY recommends.json ./
 
 # 暴露端口
 EXPOSE 3000
