@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  x-kit-api:
+    build: .
+    container_name: x-kit-api
+    ports:
+      - "3000:3000"
+    environment:
+      - AUTH_TOKEN=${AUTH_TOKEN}
+      - GET_ID_X_TOKEN=${GET_ID_X_TOKEN}
+      - PORT=3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
