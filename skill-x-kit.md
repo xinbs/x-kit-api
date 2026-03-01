@@ -249,6 +249,8 @@ const data = await response.json();
 
 - 建议配置 AUTH_TOKEN，服务会自动拉取最新 cookie 以支持搜索
 - 只有在没有 AUTH_TOKEN 时才需要手动配置 X_COOKIE
+- 搜索频率可通过环境变量调整：SEARCH_RATE_WINDOW_MS / SEARCH_RATE_MAX（默认 300000 / 30）
+- 建议搜索频率不超过每5分钟30次，过高可能触发 X 限制
 - 搜索功能可能受 Twitter 限制，某些关键词可能无法搜索
 - 建议缓存结果，避免频繁调用
 - 所有时间戳为 Twitter 格式（如 "Mon Feb 02 09:59:12 +0000 2026"）

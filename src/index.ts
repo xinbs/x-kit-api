@@ -22,8 +22,10 @@ interface RateLimitEntry {
 const rateLimits = new Map<string, RateLimitEntry>();
 
 // 频率限制中间件
-// 搜索端点：每IP每5分钟最多10次
+// 搜索端点：默认每IP每5分钟最多30次
 // 其他端点：每IP每分钟最多30次
+const searchRateWindowMs = parseInt(process.env.SEARCH_RATE_WINDOW_MS || "300000");
+const searchRateMax = parseInt(process.env.SEARCH_RATE_MAX || "30");
 const rateLimit = (options: { windowMs: number; maxRequests: number }) => {
   return async (c: any, next: any) => {
     const ip = c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown";
@@ -267,7 +269,7 @@ app.get("/api/timeline", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), as
 });
 
 // 搜索推文 - 频率限制：每5分钟最多10次
-app.get("/api/search", rateLimit({ windowMs: 5 * 60 * 1000, maxRequests: 10 }), async (c) => {
+app.get("/api/search", rateLimit({ windowMs: searchRateWindowMs, maxRequests: searchRateMax }), async (c) => {
   try {
     const query = c.req.query("q");
     const count = parseInt(c.req.query("count") || "20");
