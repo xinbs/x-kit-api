@@ -8,11 +8,12 @@
     "dev": "bun --watch src/index.ts"
   },
   "dependencies": {
-    "hono": "^4.6.14",
-    "twitter-openapi-typescript": "^0.0.45",
     "axios": "^1.7.9",
+    "dayjs": "^1.11.13",
+    "hono": "^4.6.14",
     "lodash": "^4.17.21",
-    "dayjs": "^1.11.13"
+    "twitter-openapi-typescript": "^0.0.45",
+    "x-client-transaction-id": "^0.1.9"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,6 +1,76 @@
 {
-  "description": "推荐关注的博主列表，涵盖技术开发、AI、创业、设计等领域",
+  "description": "推荐关注的博主列表，涵盖技术开发、AI、创业、设计等领域，以及全球知名名人",
   "accounts": [
+    {
+      "username": "elonmusk",
+      "name": "Elon Musk",
+      "description": "Tesla, SpaceX, X, xAI 创始人",
+      "tags": ["企业家", "科技领袖", "首富"],
+      "id": ""
+    },
+    {
+      "username": "realDonaldTrump",
+      "name": "Donald J. Trump",
+      "description": "美国第45任总统",
+      "tags": ["政治人物", "前总统"],
+      "id": ""
+    },
+    {
+      "username": "BillGates",
+      "name": "Bill Gates",
+      "description": "Microsoft 创始人，比尔及梅琳达·盖茨基金会联合主席",
+      "tags": ["企业家", "慈善家", "微软创始人"],
+      "id": ""
+    },
+    {
+      "username": "JeffBezos",
+      "name": "Jeff Bezos",
+      "description": "Amazon 创始人，Blue Origin 创始人",
+      "tags": ["企业家", "科技领袖", "亚马逊创始人"],
+      "id": ""
+    },
+    {
+      "username": "finkd",
+      "name": "Mark Zuckerberg",
+      "description": "Meta (Facebook) 创始人兼CEO",
+      "tags": ["企业家", "社交媒体", "Meta创始人"],
+      "id": ""
+    },
+    {
+      "username": "tim_cook",
+      "name": "Tim Cook",
+      "description": "Apple CEO",
+      "tags": ["企业家", "科技领袖", "苹果CEO"],
+      "id": ""
+    },
+    {
+      "username": "satyanadella",
+      "name": "Satya Nadella",
+      "description": "Microsoft CEO",
+      "tags": ["企业家", "科技领袖", "微软CEO"],
+      "id": ""
+    },
+    {
+      "username": "WarrenBuffett",
+      "name": "Warren Buffett",
+      "description": "伯克希尔·哈撒韦公司CEO，著名投资者",
+      "tags": ["投资家", "企业家", "股神"],
+      "id": ""
+    },
+    {
+      "username": "BarackObama",
+      "name": "Barack Obama",
+      "description": "美国第44任总统",
+      "tags": ["政治人物", "前总统", "诺贝尔和平奖得主"],
+      "id": ""
+    },
+    {
+      "username": "justinsuntron",
+      "name": "Justin Sun",
+      "description": "TRON 创始人，HTX (火币) 顾问",
+      "tags": ["加密货币", "企业家", "TRON创始人"],
+      "id": ""
+    },
     {
       "username": "ruanyf",
       "name": "阮一峰",
