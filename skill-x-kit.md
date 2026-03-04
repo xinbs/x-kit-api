@@ -172,6 +172,24 @@ GET /api/tweet?url={tweetUrl}
 curl "http://localhost:3000/api/tweet?url=https://x.com/vikingmute/status/2027704841674367277"
 ```
 
+### 10. Get Article Content (文章内容)
+```
+GET /api/article?id={articleId}
+GET /api/article?url={articleUrl}
+```
+根据文章或推文链接获取文章内容（优先长文 note_tweet）。
+
+**Parameters:**
+- `id` (可选): 文章 ID（与推文 ID 一致）
+- `url` (可选): 文章链接或推文链接
+
+**Rate Limit:** 每分钟最多20次
+
+**Example:**
+```bash
+curl "http://localhost:3000/api/article?url=https://x.com/berryxia/article/2028668902465733084"
+```
+
 ## Response Format
 
 所有端点返回 JSON 格式：

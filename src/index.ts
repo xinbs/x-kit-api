@@ -637,6 +637,114 @@ app.get("/api/tweet", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async
   }
 });
 
+app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async (c) => {
+  try {
+    const url = c.req.query("url");
+    const idParam = c.req.query("id") || c.req.query("articleId") || c.req.query("tweetId");
+    const articleMatch = url?.match(/article\/(\d+)/);
+    const statusMatch = url?.match(/status\/(\d+)/);
+    const tweetId = idParam || articleMatch?.[1] || statusMatch?.[1];
+
+    if (!tweetId) {
+      return c.json({ success: false, error: "Missing article id (id or url)" }, 400);
+    }
+
+    const client = process.env.AUTH_TOKEN ? await XAuthClient() : await xGuestClient();
+    const resp = await client.getTweetApi().getTweetDetail({ focalTweetId: tweetId });
+    const items = (resp.data.data || []).filter((tweet: any) => !tweet.promotedMetadata);
+
+    const mapArticle = (tweet: any) => {
+      const legacy = get(tweet, "raw.result.legacy", {});
+      const fullText = legacy.fullText || "";
+      const id =
+        legacy.idStr ||
+        get(tweet, "raw.result.rest_id") ||
+        get(tweet, "raw.result.id_str") ||
+        get(tweet, "raw.rest_id");
+      const userLegacy = get(tweet, "user.legacy", {});
+      const screenName = userLegacy.screenName;
+      const mediaItems = legacy.extendedEntities?.media || [];
+      const mediaImages = mediaItems
+        .filter((media: any) => media.type === "photo")
+        .map((media: any) => media.mediaUrlHttps);
+      const mediaVideos = mediaItems
+        .filter((media: any) => media.type === "video" || media.type === "animated_gif")
+        .map((media: any) => {
+          const variants = get(media, "videoInfo.variants", []);
+          const bestQuality = variants
+            .filter((v: any) => v.contentType === "video/mp4")
+            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+          return bestQuality?.url;
+        })
+        .filter(Boolean);
+
+      const noteResult =
+        get(tweet, "raw.result.note_tweet.note_tweet_results.result") ||
+        get(tweet, "raw.result.note_tweet_results.result") ||
+        get(tweet, "raw.result.note_tweet");
+      const noteText = noteResult?.text || noteResult?.full_text || noteResult?.fullText || null;
+      const noteTitle = noteResult?.title || noteResult?.display_title || noteResult?.displayTitle || null;
+      const noteSummary = get(noteResult, "summary.text") || noteResult?.summary || null;
+
+      return {
+        id,
+        article: noteText || noteTitle || noteSummary
+          ? {
+            text: noteText || fullText,
+            title: noteTitle || undefined,
+            summary: noteSummary || undefined,
+          }
+          : null,
+        content: noteText || fullText,
+        isArticle: Boolean(noteText),
+        tweet: {
+          id,
+          text: fullText,
+          createdAt: legacy.createdAt,
+          inReplyToStatusId: legacy.inReplyToStatusIdStr,
+          conversationId: legacy.conversationIdStr,
+          user: {
+            id: get(tweet, "user.restId"),
+            screenName,
+            name: userLegacy.name,
+            avatar: userLegacy.profileImageUrlHttps,
+            followersCount: userLegacy.followersCount,
+          },
+          stats: {
+            likes: legacy.favoriteCount,
+            retweets: legacy.retweetCount,
+            replies: legacy.replyCount,
+            quotes: legacy.quoteCount,
+          },
+          media: {
+            images: mediaImages,
+            videos: mediaVideos,
+          },
+          url: screenName && id ? `https://x.com/${screenName}/status/${id}` : undefined,
+        },
+      };
+    };
+
+    const mapped = items.map(mapArticle).filter((t: any) => t.id);
+    const focal = mapped.find((t: any) => t.id === tweetId) || null;
+
+    if (!focal) {
+      return c.json({ success: false, error: "Article not found" }, 404);
+    }
+
+    return c.json({
+      success: true,
+      articleId: tweetId,
+      article: focal.article,
+      content: focal.content,
+      isArticle: focal.isArticle,
+      tweet: focal.tweet,
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 // 获取指定用户的推文 - 频率限制：每分钟最多20次
 app.get("/api/user/:username/tweets", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async (c) => {
   try {
