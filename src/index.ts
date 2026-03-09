@@ -649,34 +649,229 @@ app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
       return c.json({ success: false, error: "Missing article id (id or url)" }, 400);
     }
 
-    const client = process.env.AUTH_TOKEN ? await XAuthClient() : await xGuestClient();
-    const resp = await client.getTweetApi().getTweetDetail({ focalTweetId: tweetId });
-    const items = (resp.data.data || []).filter((tweet: any) => !tweet.promotedMetadata);
+    const authToken = process.env.AUTH_TOKEN?.trim();
+    const explicitCookie = process.env.X_COOKIE?.trim();
+    const guestToken = process.env.GET_ID_X_TOKEN?.trim();
+    let cookieHeader = "";
+    let csrfToken = "";
+
+    if (authToken) {
+      const cookies = await getAuthCookies(authToken);
+      cookieHeader = cookies.cookieHeader;
+      csrfToken = cookies.csrfToken || "";
+    } else if (explicitCookie) {
+      cookieHeader = explicitCookie;
+      const match = explicitCookie.match(/ct0=([^;]+)/);
+      csrfToken = match?.[1] || "";
+    } else if (guestToken) {
+      const cookies = await getAuthCookies(guestToken);
+      cookieHeader = cookies.cookieHeader;
+      csrfToken = cookies.csrfToken || "";
+    }
+
+    if (!cookieHeader) {
+      throw new Error("Missing auth cookie");
+    }
+
+    const hasAuthCookie = /auth_token=/.test(cookieHeader);
+    const buildHeaders = async (path: string, referer: string) => {
+      const baseHeaders = await getApiHeaders();
+      const headers: Record<string, string> = {
+        ...baseHeaders,
+        referer,
+        cookie: cookieHeader,
+      };
+      if (csrfToken) {
+        headers["x-csrf-token"] = csrfToken;
+      }
+      if (authToken || hasAuthCookie) {
+        headers["x-twitter-auth-type"] = "OAuth2Session";
+      } else {
+        const guestTokenValue = await getGuestToken();
+        if (guestTokenValue) {
+          headers["x-guest-token"] = guestTokenValue;
+        }
+      }
+      const transactionId = await getTransactionId("GET", path);
+      headers["x-client-transaction-id"] = transactionId;
+      return headers;
+    };
+
+    const resolveFinalUrl = async (link: string) => {
+      try {
+        const resp = await axios.get(link, {
+          maxRedirects: 5,
+          timeout: 15000,
+          validateStatus: (status) => status >= 200 && status < 400,
+        });
+        const responseUrl = get(resp, "request.res.responseUrl") || link;
+        return responseUrl;
+      } catch {
+        return link;
+      }
+    };
+
+    const extractArticleIdFromUrl = (link?: string | null) => {
+      if (!link) return null;
+      const match = link.match(/(?:^|\/)article\/(\d+)/);
+      return match?.[1] || null;
+    };
+
+    const getTweetId = (tweet: any) => {
+      const legacy = get(tweet, "raw.result.legacy", {});
+      return (
+        legacy.idStr ||
+        legacy.id_str ||
+        get(tweet, "raw.result.restId") ||
+        get(tweet, "raw.result.rest_id") ||
+        get(tweet, "raw.result.id_str") ||
+        get(tweet, "raw.rest_id")
+      );
+    };
+
+    const collectTweetResults = (node: any, acc: any[] = []) => {
+      if (!node) return acc;
+      if (Array.isArray(node)) {
+        node.forEach((item) => collectTweetResults(item, acc));
+        return acc;
+      }
+      if (typeof node === "object") {
+        const tweetResults = node.tweet_results || node.tweetResults;
+        if (tweetResults?.result) {
+          acc.push(tweetResults);
+        }
+        Object.values(node).forEach((value) => collectTweetResults(value, acc));
+      }
+      return acc;
+    };
+
+    const buildTweetItem = (tweetResults: any) => {
+      let result = tweetResults?.result;
+      if (result?.tweet) {
+        result = result.tweet;
+      }
+      if (!result) return null;
+      const userResult = result?.core?.user_results?.result || result?.core?.userResults?.result || {};
+      return {
+        raw: { result },
+        user: {
+          legacy: userResult?.legacy || {},
+          restId: userResult?.rest_id || userResult?.restId,
+        },
+      };
+    };
+
+    const fetchTweetDetailItems = async (id: string) => {
+      const flag = await getOpenApiFlag("TweetDetail");
+      const path = flag["@path"];
+      const params = {
+        variables: JSON.stringify({
+          ...(flag.variables || {}),
+          focalTweetId: id,
+        }),
+        features: JSON.stringify(flag.features || {}),
+        fieldToggles: JSON.stringify({
+          ...(flag.fieldToggles || {}),
+          withArticleRichContentState: true,
+          withArticlePlainText: true,
+          withArticleSummaryText: true,
+          withArticleVoiceOver: true,
+        }),
+      };
+      const headers = await buildHeaders(path, `https://x.com/i/status/${id}`);
+      const resp = await axios.get(`https://x.com${path}`, { params, headers });
+      const conversation =
+        resp.data?.data?.threaded_conversation_with_injections_v2 ||
+        resp.data?.data?.threadedConversationWithInjectionsV2;
+      const normalized = errorCheck(conversation, resp.data?.errors);
+      return collectTweetResults(normalized.instructions || [])
+        .map(buildTweetItem)
+        .filter(Boolean);
+    };
+
+    const extractCandidateUrls = (tweet: any) => {
+      const legacy = get(tweet, "raw.result.legacy", {});
+      const urls = legacy.entities?.urls || [];
+      const candidates = new Set<string>();
+      urls.forEach((u: any) => {
+        const expanded = u?.expandedUrl || u?.expanded_url;
+        const urlValue = u?.url;
+        const display = u?.displayUrl || u?.display_url;
+        if (expanded) candidates.add(expanded);
+        if (urlValue) candidates.add(urlValue);
+        if (display) candidates.add(display);
+      });
+      const articleResult =
+        get(tweet, "raw.result.article.articleResults.result") ||
+        get(tweet, "raw.result.article.article_results.result");
+      const articleRestId = articleResult?.restId || articleResult?.rest_id;
+      if (articleRestId) {
+        candidates.add(`https://x.com/i/article/${articleRestId}`);
+      }
+      const bindings = get(tweet, "raw.result.card.legacy.binding_values", []);
+      if (Array.isArray(bindings)) {
+        bindings.forEach((b: any) => {
+          const v = b?.value?.string_value || b?.value?.s;
+          if (typeof v === "string") candidates.add(v);
+        });
+      }
+      const fullText = legacy.fullText || legacy.full_text || "";
+      const textUrls = fullText.match(/https?:\/\/\S+/g) || [];
+      textUrls.forEach((u: string) => candidates.add(u));
+      return Array.from(candidates);
+    };
+
+    const collectImageUrls = (mediaItems: any[]) =>
+      Array.from(new Set(
+        (mediaItems || [])
+          .map((media: any) =>
+            media?.mediaUrlHttps ||
+            media?.media_url_https ||
+            media?.mediaInfo?.originalImgUrl ||
+            media?.media_info?.original_img_url
+          )
+          .filter(Boolean)
+      ));
+
+    const collectVideoUrls = (mediaItems: any[]) =>
+      Array.from(new Set(
+        (mediaItems || [])
+          .filter((media: any) => media?.type === "video" || media?.type === "animated_gif")
+          .map((media: any) => {
+            const variants = media?.videoInfo?.variants || media?.video_info?.variants || [];
+            const bestQuality = variants
+              .filter((v: any) => v?.contentType === "video/mp4" || v?.content_type === "video/mp4")
+              .sort((a: any, b: any) => (b?.bitrate || 0) - (a?.bitrate || 0))[0];
+            return bestQuality?.url;
+          })
+          .filter(Boolean)
+      ));
 
     const mapArticle = (tweet: any) => {
       const legacy = get(tweet, "raw.result.legacy", {});
-      const fullText = legacy.fullText || "";
+      const fullText = legacy.fullText || legacy.full_text || "";
       const id =
         legacy.idStr ||
+        legacy.id_str ||
+        get(tweet, "raw.result.restId") ||
         get(tweet, "raw.result.rest_id") ||
         get(tweet, "raw.result.id_str") ||
         get(tweet, "raw.rest_id");
       const userLegacy = get(tweet, "user.legacy", {});
-      const screenName = userLegacy.screenName;
-      const mediaItems = legacy.extendedEntities?.media || [];
-      const mediaImages = mediaItems
-        .filter((media: any) => media.type === "photo")
-        .map((media: any) => media.mediaUrlHttps);
-      const mediaVideos = mediaItems
-        .filter((media: any) => media.type === "video" || media.type === "animated_gif")
-        .map((media: any) => {
-          const variants = get(media, "videoInfo.variants", []);
-          const bestQuality = variants
-            .filter((v: any) => v.contentType === "video/mp4")
-            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-          return bestQuality?.url;
-        })
-        .filter(Boolean);
+      const screenName = userLegacy.screenName || userLegacy.screen_name;
+      const mediaItems = legacy.extendedEntities?.media || legacy.extended_entities?.media || [];
+      const articleResult =
+        get(tweet, "raw.result.article.articleResults.result") ||
+        get(tweet, "raw.result.article.article_results.result");
+      const articleMediaItems = articleResult?.mediaEntities || articleResult?.media_entities || [];
+      const coverMedia = articleResult?.coverMedia || articleResult?.cover_media;
+      const mediaImages = Array.from(new Set([
+        ...collectImageUrls(mediaItems.filter((media: any) => media?.type === "photo")),
+        ...collectImageUrls(articleMediaItems),
+        coverMedia?.mediaInfo?.originalImgUrl,
+        coverMedia?.media_info?.original_img_url,
+      ].filter(Boolean)));
+      const mediaVideos = collectVideoUrls(mediaItems);
 
       const noteResult =
         get(tweet, "raw.result.note_tweet.note_tweet_results.result") ||
@@ -685,36 +880,41 @@ app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
       const noteText = noteResult?.text || noteResult?.full_text || noteResult?.fullText || null;
       const noteTitle = noteResult?.title || noteResult?.display_title || noteResult?.displayTitle || null;
       const noteSummary = get(noteResult, "summary.text") || noteResult?.summary || null;
+      const articleText = articleResult?.plainText || articleResult?.plain_text || null;
+      const articleTitle = articleResult?.title || null;
+      const articlePreview = articleResult?.previewText || articleResult?.preview_text || null;
+      const articleId = articleResult?.restId || articleResult?.rest_id || null;
 
       return {
         id,
-        article: noteText || noteTitle || noteSummary
+        articleId,
+        article: articleText || noteText || articleTitle || noteTitle || articlePreview || noteSummary
           ? {
-            text: noteText || fullText,
-            title: noteTitle || undefined,
-            summary: noteSummary || undefined,
+            text: articleText || noteText || fullText,
+            title: articleTitle || noteTitle || undefined,
+            summary: articlePreview || noteSummary || undefined,
           }
           : null,
-        content: noteText || fullText,
-        isArticle: Boolean(noteText),
+        content: articleText || noteText || fullText,
+        isArticle: Boolean(articleText || noteText),
         tweet: {
           id,
           text: fullText,
-          createdAt: legacy.createdAt,
-          inReplyToStatusId: legacy.inReplyToStatusIdStr,
-          conversationId: legacy.conversationIdStr,
+          createdAt: legacy.createdAt || legacy.created_at,
+          inReplyToStatusId: legacy.inReplyToStatusIdStr || legacy.in_reply_to_status_id_str,
+          conversationId: legacy.conversationIdStr || legacy.conversation_id_str,
           user: {
             id: get(tweet, "user.restId"),
             screenName,
             name: userLegacy.name,
-            avatar: userLegacy.profileImageUrlHttps,
-            followersCount: userLegacy.followersCount,
+            avatar: userLegacy.profileImageUrlHttps || userLegacy.profile_image_url_https,
+            followersCount: userLegacy.followersCount || userLegacy.followers_count,
           },
           stats: {
-            likes: legacy.favoriteCount,
-            retweets: legacy.retweetCount,
-            replies: legacy.replyCount,
-            quotes: legacy.quoteCount,
+            likes: legacy.favoriteCount ?? legacy.favorite_count,
+            retweets: legacy.retweetCount ?? legacy.retweet_count,
+            replies: legacy.replyCount ?? legacy.reply_count,
+            quotes: legacy.quoteCount ?? legacy.quote_count,
           },
           media: {
             images: mediaImages,
@@ -725,6 +925,14 @@ app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
       };
     };
 
+    const fetchArticleById = async (id: string) => {
+      const items = await fetchTweetDetailItems(id);
+      const mapped = items.map(mapArticle).filter((t: any) => t.id);
+      const focal = mapped.find((t: any) => t.id === id) || null;
+      return focal ? { focal, items } : { focal: null, items };
+    };
+
+    const items = await fetchTweetDetailItems(tweetId);
     const mapped = items.map(mapArticle).filter((t: any) => t.id);
     const focal = mapped.find((t: any) => t.id === tweetId) || null;
 
@@ -732,9 +940,45 @@ app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
       return c.json({ success: false, error: "Article not found" }, 404);
     }
 
+    if (!focal.isArticle) {
+      const rawFocal = items.find((t: any) => getTweetId(t) === tweetId) || null;
+      if (rawFocal) {
+        const candidates = extractCandidateUrls(rawFocal);
+        let resolvedArticleId: string | null = null;
+        for (const candidate of candidates) {
+          const directId = extractArticleIdFromUrl(candidate);
+          if (directId) {
+            resolvedArticleId = directId;
+            break;
+          }
+          if (candidate.includes("t.co/")) {
+            const finalUrl = await resolveFinalUrl(candidate);
+            const idFromFinal = extractArticleIdFromUrl(finalUrl);
+            if (idFromFinal) {
+              resolvedArticleId = idFromFinal;
+              break;
+            }
+          }
+        }
+        if (resolvedArticleId && resolvedArticleId !== tweetId) {
+          const resolved = await fetchArticleById(resolvedArticleId);
+          if (resolved.focal) {
+            return c.json({
+              success: true,
+              articleId: resolved.focal.articleId || resolvedArticleId,
+              article: resolved.focal.article,
+              content: resolved.focal.content,
+              isArticle: resolved.focal.isArticle,
+              tweet: resolved.focal.tweet,
+            });
+          }
+        }
+      }
+    }
+
     return c.json({
       success: true,
-      articleId: tweetId,
+      articleId: focal.articleId || tweetId,
       article: focal.article,
       content: focal.content,
       isArticle: focal.isArticle,
