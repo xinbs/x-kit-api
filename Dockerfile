@@ -6,8 +6,8 @@ WORKDIR /app
 # 安装 curl 用于健康检查
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
-COPY package.json bun.lockb* ./
+# 复制依赖文件。项目当前使用文本格式的 bun.lock，需要一并复制进镜像。
+COPY package.json bun.lock bun.lockb* ./
 
 # 安装依赖
 RUN bun install --frozen-lockfile

@@ -11,6 +11,13 @@ let transactionClient: ClientTransaction | null = null;
 let transactionExpiresAt = 0;
 let openApiConfigCache: { data: Record<string, any>; expiresAt: number } | null = null;
 
+const refreshTransactionClient = async () => {
+  const document = await handleXMigration();
+  transactionClient = await ClientTransaction.create(document);
+  transactionExpiresAt = Date.now() + 10 * 60 * 1000;
+  return transactionClient;
+};
+
 export const getAuthCookies = async (TOKEN: string) => {
   const resp = await axios.get("https://x.com/manifest.json", {
     headers: {
@@ -61,11 +68,16 @@ export const getOpenApiFlag = async (key: string) => {
 export const getTransactionId = async (method: string, path: string) => {
   const now = Date.now();
   if (!transactionClient || now > transactionExpiresAt) {
-    const document = await handleXMigration();
-    transactionClient = await ClientTransaction.create(document);
-    transactionExpiresAt = now + 10 * 60 * 1000;
+    await refreshTransactionClient();
   }
-  return transactionClient.generateTransactionId(method, path);
+  try {
+    return await transactionClient!.generateTransactionId(method, path);
+  } catch (error) {
+    transactionClient = null;
+    transactionExpiresAt = 0;
+    const nextClient = await refreshTransactionClient();
+    return nextClient.generateTransactionId(method, path);
+  }
 };
 
 export const _xClient = async (TOKEN: string) => {
