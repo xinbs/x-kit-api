@@ -27,12 +27,16 @@ export const getAuthCookies = async (TOKEN: string) => {
 
   const resCookie = (resp.headers["set-cookie"] as string[]) || [];
   const cookieObj = resCookie.reduce((acc: Record<string, string>, cookie: string) => {
-    const [name, value] = cookie.split(";")[0].split("=");
+    const pair = cookie.split(";")[0];
+    const separator = pair.indexOf("=");
+    if (separator < 1) return acc;
+    const name = pair.slice(0, separator);
+    const value = pair.slice(separator + 1);
     acc[name] = value;
     return acc;
   }, {});
 
-  const merged = { ...cookieObj, auth_token: TOKEN };
+  const merged: Record<string, string> = { ...cookieObj, auth_token: TOKEN };
   const cookieHeader = Object.entries(merged)
     .map(([name, value]) => `${name}=${value}`)
     .join("; ");

@@ -26,31 +26,36 @@ curl "http://localhost:3000/api/timeline?count=10"
 
 ### 2. Get Trends (趋势话题)
 ```
-GET /api/trends
+GET /api/trends?region=worldwide&count=20
 ```
-获取热门话题标签（基于搜索和时间线聚合）。
+获取 X 官方趋势。不传地区时使用当前账号的 Explore Trending；支持 `region`（地区名、slug、国家代码）或 `woeid`。调用 `GET /api/trend-locations` 获取完整动态地区目录。旧版时间线聚合可用 `source=timeline`。
 
 **Rate Limit:** 每5分钟最多10次
 
 **Example:**
 ```bash
 curl "http://localhost:3000/api/trends"
+curl "http://localhost:3000/api/trends?region=jp&count=20"
+curl "http://localhost:3000/api/trend-locations?country=JP&type=Town"
 ```
 
 ### 3. Get Explore (热门推荐)
 ```
 GET /api/explore?category=for-you
 ```
-获取推荐的热门推文内容。
+获取 X 官方 Explore 分类的趋势卡片和推文。
 
 **Parameters:**
-- `category` (可选): 分类，默认 for-you
+- `category` (可选): 分类，默认 `for-you`；常见值为 `trending`、`news`、`sports`、`entertainment`
+- `count` (可选): 每类最大返回数量，默认20，最大100
+
+使用 `GET /api/explore/categories` 获取账号当前的可选分类；`GET /api/explore/settings` 查看只读设置；`GET /api/explore/locations` 获取 Explore 偏好地点目录。
 
 **Rate Limit:** 每分钟最多20次
 
 **Example:**
 ```bash
-curl "http://localhost:3000/api/explore?count=20"
+curl "http://localhost:3000/api/explore?category=news&count=20"
 ```
 
 ### 4. Search Tweets (搜索推文)

@@ -2,13 +2,31 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { get } from "lodash";
-import dayjs from "dayjs";
 import axios from "axios";
-import { getApiHeaders, getAuthCookies, getOpenApiFlag, getTransactionId, xGuestClient, XAuthClient } from "./utils";
+import { getApiHeaders, getAuthCookies, getOpenApiFlag, getTransactionId } from "./utils";
+import {
+  fetchHomeTimeline,
+  fetchExploreLocations,
+  fetchExploreSettings,
+  fetchOfficialExplore,
+  fetchOfficialRegionTrends,
+  fetchRawUser,
+  fetchTrendLocations,
+  fetchTweetDetail,
+  fetchUserTweets,
+  mapRawUser,
+  mapRawTweets,
+  resolveTrendLocation,
+} from "./x-api";
 import { errorCheck } from "twitter-openapi-typescript/dist/src/utils/api";
 
 const app = new Hono();
 let guestTokenCache: { token: string; expiresAt: number } | null = null;
+
+const boundedInt = (value: string | undefined, fallback: number, max: number) => {
+  const parsed = Number.parseInt(value || "", 10);
+  return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), max) : fallback;
+};
 
 app.use(cors());
 app.use(logger());
@@ -133,41 +151,25 @@ app.get("/api/recommends/tweets", rateLimit({ windowMs: 60 * 1000, maxRequests: 
       return c.json({ success: false, error: "No recommended accounts found" }, 404);
     }
 
-    const client = process.env.AUTH_TOKEN ? await XAuthClient() : await xGuestClient();
     const allTweets: any[] = [];
 
     // 获取每个推荐博主的最新推文
     for (const account of accounts.slice(0, count)) {
       try {
-        const userResp = await client.getUserApi().getUserByScreenName({
-          screenName: account.username,
-        });
-
-        const userId = userResp.data.user?.restId;
+        const rawUser = await fetchRawUser(account.username);
+        const userId = rawUser?.rest_id || rawUser?.restId;
         if (!userId) continue;
-
-        const tweetsResp = await client.getTweetApi().getUserTweets({
-          userId,
-          count: maxPerUser,
-        });
-
-        const tweets = tweetsResp.data.data.map((tweet) => ({
-          id: get(tweet, "raw.result.legacy.idStr"),
-          text: get(tweet, "raw.result.legacy.fullText"),
-          createdAt: get(tweet, "raw.result.legacy.createdAt"),
-          stats: {
-            likes: get(tweet, "raw.result.legacy.favoriteCount"),
-            retweets: get(tweet, "raw.result.legacy.retweetCount"),
-            replies: get(tweet, "raw.result.legacy.replyCount"),
-          },
+        const tweets = (await fetchUserTweets(userId, maxPerUser)).map((tweet: any) => ({
+          ...tweet,
           user: {
-            id: account.id,
+            ...tweet.user,
+            id: userId,
             username: account.username,
-            name: account.name,
+            name: tweet.user?.name || account.name,
             description: account.description,
             tags: account.tags,
           },
-          url: `https://x.com/${account.username}/status/${get(tweet, "raw.result.legacy.idStr")}`,
+          url: `https://x.com/${account.username}/status/${tweet.id}`,
         }));
 
         allTweets.push(...tweets);
@@ -199,64 +201,9 @@ app.get("/api/recommends/tweets", rateLimit({ windowMs: 60 * 1000, maxRequests: 
 app.get("/api/timeline", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {
   try {
     const count = parseInt(c.req.query("count") || "20");
-    const client = await XAuthClient();
-
-    const resp = await client.getTweetApi().getHomeLatestTimeline({
-      count: Math.min(count, 100),
-    });
-
-    // 过滤并格式化推文
-    const tweets = resp.data.data
-      .filter((tweet) => !tweet.referenced_tweets || tweet.referenced_tweets.length === 0)
-      .map((tweet) => {
-        const fullText = get(tweet, "raw.result.legacy.fullText", "");
-        const isRetweet = fullText?.includes("RT @");
-        const isQuote = get(tweet, "raw.result.legacy.isQuoteStatus");
-
-        // 提取媒体
-        const mediaItems = get(tweet, "raw.result.legacy.extendedEntities.media", []);
-        const images = mediaItems
-          .filter((media: any) => media.type === "photo")
-          .map((media: any) => media.mediaUrlHttps);
-
-        const videos = mediaItems
-          .filter((media: any) => media.type === "video" || media.type === "animated_gif")
-          .map((media: any) => {
-            const variants = get(media, "videoInfo.variants", []);
-            const bestQuality = variants
-              .filter((v: any) => v.contentType === "video/mp4")
-              .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-            return bestQuality?.url;
-          })
-          .filter(Boolean);
-
-        return {
-          id: get(tweet, "raw.result.legacy.idStr"),
-          text: fullText,
-          createdAt: get(tweet, "raw.result.legacy.createdAt"),
-          user: {
-            id: get(tweet, "user.restId"),
-            screenName: get(tweet, "user.legacy.screenName"),
-            name: get(tweet, "user.legacy.name"),
-            avatar: get(tweet, "user.legacy.profileImageUrlHttps"),
-            followersCount: get(tweet, "user.legacy.followersCount"),
-            friendsCount: get(tweet, "user.legacy.friendsCount"),
-          },
-          stats: {
-            likes: get(tweet, "raw.result.legacy.favoriteCount"),
-            retweets: get(tweet, "raw.result.legacy.retweetCount"),
-            replies: get(tweet, "raw.result.legacy.replyCount"),
-          },
-          media: {
-            images,
-            videos,
-          },
-          url: `https://x.com/${get(tweet, "user.legacy.screenName")}/status/${get(tweet, "raw.result.legacy.idStr")}`,
-          isRetweet,
-          isQuote,
-        };
-      })
-      .filter((tweet) => !tweet.isRetweet && !tweet.isQuote);
+    const tweets = (await fetchHomeTimeline(Math.min(count * 2, 100)))
+      .filter((tweet: any) => !tweet.isRetweet && !tweet.isQuote)
+      .slice(0, Math.min(count, 100));
 
     return c.json({
       success: true,
@@ -284,57 +231,6 @@ app.get("/api/search", rateLimit({ windowMs: searchRateWindowMs, maxRequests: se
     }
 
     const authToken = process.env.AUTH_TOKEN?.trim();
-    const mapGraphqlTweet = (tweetResults: any) => {
-      let result = tweetResults?.result;
-      if (result?.tweet) {
-        result = result.tweet;
-      }
-      const legacy = result?.legacy || {};
-      const userResult = result?.core?.user_results?.result || result?.core?.userResults?.result;
-      const userLegacy = userResult?.legacy || {};
-      const mediaItems = legacy?.extended_entities?.media || legacy?.extendedEntities?.media || [];
-      const id = legacy?.id_str || legacy?.idStr;
-      const screenName = userLegacy?.screen_name || userLegacy?.screenName;
-
-      return {
-        id,
-        text: legacy?.full_text || legacy?.fullText || "",
-        createdAt: legacy?.created_at || legacy?.createdAt,
-        user: {
-          screenName,
-          name: userLegacy?.name,
-          avatar: userLegacy?.profile_image_url_https || userLegacy?.profileImageUrlHttps,
-          followersCount: userLegacy?.followers_count || userLegacy?.followersCount,
-        },
-        stats: {
-          likes: legacy?.favorite_count ?? legacy?.favoriteCount ?? 0,
-          retweets: legacy?.retweet_count ?? legacy?.retweetCount ?? 0,
-        },
-        media: {
-          images: (mediaItems || [])
-            .filter((media: any) => media.type === "photo")
-            .map((media: any) => media.media_url_https || media.mediaUrlHttps || media.media_url),
-        },
-        url: screenName && id ? `https://x.com/${screenName}/status/${id}` : undefined,
-      };
-    };
-
-    const collectTweetResults = (node: any, acc: any[] = []) => {
-      if (!node) return acc;
-      if (Array.isArray(node)) {
-        node.forEach((item) => collectTweetResults(item, acc));
-        return acc;
-      }
-      if (typeof node === "object") {
-        const tweetResults = node.tweet_results || node.tweetResults;
-        if (tweetResults?.result) {
-          acc.push(tweetResults);
-        }
-        Object.values(node).forEach((value) => collectTweetResults(value, acc));
-      }
-      return acc;
-    };
-
     const mapAdaptiveTweet = (tweet: any, user: any) => {
       const mediaItems = tweet?.extended_entities?.media || [];
       return {
@@ -428,18 +324,7 @@ app.get("/api/search", rateLimit({ windowMs: searchRateWindowMs, maxRequests: se
       const normalized = errorCheck(searchData, resp.data?.errors);
       const timeline = normalized.searchTimeline || normalized.search_timeline;
       const instructions = timeline.timeline.instructions;
-      const tweetResults = collectTweetResults(instructions);
-      const seen = new Set<string>();
-      const tweets = tweetResults
-        .map(mapGraphqlTweet)
-        .filter((tweet: any) => {
-          if (!tweet?.id) return false;
-          if (seen.has(tweet.id)) return false;
-          seen.add(tweet.id);
-          return true;
-        })
-        .slice(0, Math.min(count, 100));
-      return tweets;
+      return mapRawTweets(instructions, Math.min(count, 100));
     };
 
     const searchAdaptive = async () => {
@@ -533,16 +418,9 @@ app.get("/api/search", rateLimit({ windowMs: searchRateWindowMs, maxRequests: se
   } catch (error: any) {
     const response = error?.response;
     if (response?.status) {
-      let detail = "";
-      try {
-        detail = JSON.stringify(await response.json());
-      } catch {
-        try {
-          detail = await response.text();
-        } catch {
-          detail = "";
-        }
-      }
+      const detail = typeof response.data === "string"
+        ? response.data
+        : JSON.stringify(response.data || "");
       return c.json({
         success: false,
         error: `Search request failed (${response.status})`,
@@ -564,64 +442,7 @@ app.get("/api/tweet", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async
       return c.json({ success: false, error: "Missing tweet id (id or url)" }, 400);
     }
 
-    const client = process.env.AUTH_TOKEN ? await XAuthClient() : await xGuestClient();
-    const resp = await client.getTweetApi().getTweetDetail({ focalTweetId: tweetId });
-
-    const items = (resp.data.data || []).filter((tweet: any) => !tweet.promotedMetadata);
-
-    const mapTweet = (tweet: any) => {
-      const legacy = get(tweet, "raw.result.legacy", {});
-      const fullText = legacy.fullText || "";
-      const mediaItems = legacy.extendedEntities?.media || [];
-      const id =
-        legacy.idStr ||
-        get(tweet, "raw.result.rest_id") ||
-        get(tweet, "raw.result.id_str") ||
-        get(tweet, "raw.rest_id");
-      const userLegacy = get(tweet, "user.legacy", {});
-      const screenName = userLegacy.screenName;
-      const mediaImages = mediaItems
-        .filter((media: any) => media.type === "photo")
-        .map((media: any) => media.mediaUrlHttps);
-      const mediaVideos = mediaItems
-        .filter((media: any) => media.type === "video" || media.type === "animated_gif")
-        .map((media: any) => {
-          const variants = get(media, "videoInfo.variants", []);
-          const bestQuality = variants
-            .filter((v: any) => v.contentType === "video/mp4")
-            .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-          return bestQuality?.url;
-        })
-        .filter(Boolean);
-
-      return {
-        id,
-        text: fullText,
-        createdAt: legacy.createdAt,
-        inReplyToStatusId: legacy.inReplyToStatusIdStr,
-        conversationId: legacy.conversationIdStr,
-        user: {
-          id: get(tweet, "user.restId"),
-          screenName,
-          name: userLegacy.name,
-          avatar: userLegacy.profileImageUrlHttps,
-          followersCount: userLegacy.followersCount,
-        },
-        stats: {
-          likes: legacy.favoriteCount,
-          retweets: legacy.retweetCount,
-          replies: legacy.replyCount,
-          quotes: legacy.quoteCount,
-        },
-        media: {
-          images: mediaImages,
-          videos: mediaVideos,
-        },
-        url: screenName && id ? `https://x.com/${screenName}/status/${id}` : undefined,
-      };
-    };
-
-    const mapped = items.map(mapTweet).filter((t: any) => t.id);
+    const mapped = await fetchTweetDetail(tweetId);
     const focal = mapped.find((t: any) => t.id === tweetId) || null;
     const replies = mapped.filter((t: any) => t.id !== tweetId);
 
@@ -752,10 +573,22 @@ app.get("/api/article", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
       }
       if (!result) return null;
       const userResult = result?.core?.user_results?.result || result?.core?.userResults?.result || {};
+      const userCore = userResult?.core || {};
+      const userLegacy = userResult?.legacy || {};
       return {
         raw: { result },
         user: {
-          legacy: userResult?.legacy || {},
+          legacy: {
+            ...userLegacy,
+            screenName: userCore.screen_name || userCore.screenName || userLegacy.screen_name || userLegacy.screenName,
+            name: userCore.name || userLegacy.name,
+            profileImageUrlHttps:
+              userResult?.avatar?.image_url ||
+              userResult?.avatar?.imageUrl ||
+              userLegacy.profile_image_url_https ||
+              userLegacy.profileImageUrlHttps,
+            followersCount: userLegacy.followers_count ?? userLegacy.followersCount,
+          },
           restId: userResult?.rest_id || userResult?.restId,
         },
       };
@@ -995,32 +828,14 @@ app.get("/api/user/:username/tweets", rateLimit({ windowMs: 60 * 1000, maxReques
     const username = c.req.param("username");
     const count = parseInt(c.req.query("count") || "20");
 
-    const client = await xGuestClient();
-
-    const user = await client.getUserApi().getUserByScreenName({
-      screenName: username,
-    });
-
-    const userId = user.data.user?.restId;
+    const rawUser = await fetchRawUser(username);
+    const userId = rawUser?.rest_id || rawUser?.restId;
     if (!userId) {
       return c.json({ success: false, error: "User not found" }, 404);
     }
-
-    const resp = await client.getTweetApi().getUserTweets({
-      userId,
-      count: Math.min(count, 100),
-    });
-
-    const tweets = resp.data.data.map((tweet) => ({
-      id: get(tweet, "raw.result.legacy.idStr"),
-      text: get(tweet, "raw.result.legacy.fullText"),
-      createdAt: get(tweet, "raw.result.legacy.createdAt"),
-      stats: {
-        likes: get(tweet, "raw.result.legacy.favoriteCount"),
-        retweets: get(tweet, "raw.result.legacy.retweetCount"),
-        replies: get(tweet, "raw.result.legacy.replyCount"),
-      },
-      url: `https://x.com/${username}/status/${get(tweet, "raw.result.legacy.idStr")}`,
+    const tweets = (await fetchUserTweets(userId, Math.min(count, 100))).map((tweet: any) => ({
+      ...tweet,
+      url: `https://x.com/${username}/status/${tweet.id}`,
     }));
 
     return c.json({
@@ -1034,88 +849,184 @@ app.get("/api/user/:username/tweets", rateLimit({ windowMs: 60 * 1000, maxReques
   }
 });
 
-// 获取 x.com/explore 趋势话题 - 频率限制：每5分钟最多10次
+// 获取官方趋势地区目录（WOEID）
+app.get("/api/trend-locations", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {
+  try {
+    const q = (c.req.query("q") || "").trim().toLowerCase();
+    const country = (c.req.query("country") || "").trim().toLowerCase();
+    const type = (c.req.query("type") || "").trim().toLowerCase();
+    const limit = boundedInt(c.req.query("limit"), 200, 1000);
+    const allLocations = await fetchTrendLocations();
+    const matched = allLocations.filter((location: any) => {
+      const searchable = [
+        location.name,
+        location.slug,
+        location.country,
+        location.countryCode,
+        location.placeType,
+        location.woeid,
+      ].filter(Boolean).join(" ").toLowerCase();
+      const countryMatches = !country ||
+        String(location.countryCode || "").toLowerCase() === country ||
+        String(location.country || "").toLowerCase() === country;
+      const typeMatches = !type || String(location.placeType || "").toLowerCase() === type;
+      return (!q || searchable.includes(q)) && countryMatches && typeMatches;
+    });
+    const data = matched.slice(0, limit);
+
+    return c.json({
+      success: true,
+      source: "x_trends_available",
+      usage: "将 region 或 woeid 传给 /api/trends",
+      total: allLocations.length,
+      matchedCount: matched.length,
+      count: data.length,
+      data,
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 获取官方 Explore 地点目录（place_id，仅用于识别账号偏好地点）
+app.get("/api/explore/locations", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {
+  try {
+    const q = (c.req.query("q") || "").trim().toLowerCase();
+    const type = (c.req.query("type") || "").trim().toLowerCase();
+    const limit = boundedInt(c.req.query("limit"), 200, 1000);
+    const allLocations = await fetchExploreLocations();
+    const matched = allLocations.filter((location: any) => {
+      const searchable = [location.name, location.slug, location.placeId, location.locationType]
+        .filter(Boolean).join(" ").toLowerCase();
+      const typeMatches = !type || String(location.locationType || "").toLowerCase() === type;
+      return (!q || searchable.includes(q)) && typeMatches;
+    });
+    const data = matched.slice(0, limit);
+
+    return c.json({
+      success: true,
+      source: "x_explore_locations",
+      usage: "只读地点目录；placeId 不是 WOEID，地区热搜请使用 /api/trend-locations",
+      total: allLocations.length,
+      matchedCount: matched.length,
+      count: data.length,
+      data,
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 获取当前账号的官方 Explore 设置（只读）
+app.get("/api/explore/settings", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {
+  try {
+    return c.json({
+      success: true,
+      readOnly: true,
+      note: "这是当前 AUTH_TOKEN 对应账号的全局 Explore 设置，本服务不会自动修改它",
+      data: await fetchExploreSettings(),
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 获取当前账号可用的官方 Explore 分类
+app.get("/api/explore/categories", rateLimit({ windowMs: 60 * 1000, maxRequests: 30 }), async (c) => {
+  try {
+    const result = await fetchOfficialExplore("for-you");
+    return c.json({
+      success: true,
+      source: "official_explore",
+      count: result.categories.length,
+      data: result.categories,
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 获取 x.com 官方趋势话题 - 频率限制：每5分钟最多10次
 app.get("/api/trends", rateLimit({ windowMs: 5 * 60 * 1000, maxRequests: 10 }), async (c) => {
   try {
-    const client = await xGuestClient();
+    const source = (c.req.query("source") || "official").trim().toLowerCase();
+    const count = boundedInt(c.req.query("count"), 20, 50);
+    const region = c.req.query("region")?.trim();
+    const woeid = c.req.query("woeid")?.trim();
 
-    // 方案1: 尝试使用搜索热门话题
-    const hotKeywords = ["news", "breaking", "trending", "viral", "today"];
-    const allHashtags = new Map<string, { count: number; tweets: any[] }>();
+    if (!["official", "timeline", "aggregated", "aggregated_timeline"].includes(source)) {
+      return c.json({
+        success: false,
+        error: `Unsupported trends source: ${source}`,
+        supportedSources: ["official", "timeline"],
+      }, 400);
+    }
 
-    // 搜索多个热门关键词，聚合话题标签
-    for (const keyword of hotKeywords.slice(0, 3)) {
-      try {
-        const searchResp = await client.getTweetApi().getSearchTimeline({
-          rawQuery: keyword,
-          count: 30,
+    if (source === "official") {
+      const useAccountRegion = !woeid && (!region || ["account", "current", "personalized"]
+        .includes(region.toLowerCase()));
+      if (useAccountRegion) {
+        const result = await fetchOfficialExplore("trending");
+        const data = result.trends.slice(0, count);
+        return c.json({
+          success: true,
+          source: "official_explore",
+          region: "account",
+          note: "使用当前账号的官方 Explore/Trending 地区与个性化设置",
+          settingsUrl: "/api/explore/settings",
+          count: data.length,
+          data,
         });
-
-        searchResp.data.data.forEach((tweet) => {
-          const text = get(tweet, "raw.result.legacy.fullText", "");
-          const hashtags = get(tweet, "raw.result.legacy.entities.hashtags", []);
-
-          hashtags.forEach((tag: any) => {
-            const tagText = tag.text;
-            if (tagText && tagText.length > 1) {
-              const existing = allHashtags.get(tagText);
-              if (existing) {
-                existing.count++;
-              } else {
-                allHashtags.set(tagText, {
-                  count: 1,
-                  tweets: [{
-                    id: get(tweet, "raw.result.legacy.idStr"),
-                    text: text.slice(0, 100),
-                    user: get(tweet, "user.legacy.screenName"),
-                  }],
-                });
-              }
-            }
-          });
-        });
-      } catch (e) {
-        // 忽略单个搜索失败
       }
+
+      let location;
+      try {
+        location = await resolveTrendLocation(region, woeid);
+      } catch (error: any) {
+        return c.json({
+          success: false,
+          error: error.message,
+          locationsUrl: "/api/trend-locations",
+        }, 400);
+      }
+      const result = await fetchOfficialRegionTrends(location.woeid);
+      const data = result.trends.slice(0, count);
+      return c.json({
+        success: true,
+        source: "official_region",
+        region: location,
+        asOf: result.asOf,
+        createdAt: result.createdAt,
+        count: data.length,
+        data,
+      });
     }
 
-    // 方案2: 从时间线补充话题标签
-    try {
-      const timelineResp = await client.getTweetApi().getHomeLatestTimeline({
-        count: 100,
+    const allHashtags = new Map<string, { count: number; tweets: any[] }>();
+    const tweets = await fetchHomeTimeline(100);
+    tweets.forEach((tweet: any) => {
+      (tweet.hashtags || []).forEach((tagText: string) => {
+        if (!tagText || tagText.length <= 1) return;
+        const existing = allHashtags.get(tagText);
+        if (existing) {
+          existing.count++;
+        } else {
+          allHashtags.set(tagText, {
+            count: 1,
+            tweets: [{
+              id: tweet.id,
+              text: tweet.text.slice(0, 100),
+              user: tweet.user?.screenName,
+            }],
+          });
+        }
       });
-
-      timelineResp.data.data.forEach((tweet) => {
-        const text = get(tweet, "raw.result.legacy.fullText", "");
-        const hashtags = get(tweet, "raw.result.legacy.entities.hashtags", []);
-
-        hashtags.forEach((tag: any) => {
-          const tagText = tag.text;
-          if (tagText && tagText.length > 1) {
-            const existing = allHashtags.get(tagText);
-            if (existing) {
-              existing.count++;
-            } else {
-              allHashtags.set(tagText, {
-                count: 1,
-                tweets: [{
-                  id: get(tweet, "raw.result.legacy.idStr"),
-                  text: text.slice(0, 100),
-                  user: get(tweet, "user.legacy.screenName"),
-                }],
-              });
-            }
-          }
-        });
-      });
-    } catch (e) {
-      // 忽略时间线获取失败
-    }
+    });
 
     // 按出现次数排序
     const sortedTrends = Array.from(allHashtags.entries())
       .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 20)
+      .slice(0, count)
       .map(([tag, data]) => ({
         name: tag,
         displayName: `#${tag}`,
@@ -1128,8 +1039,8 @@ app.get("/api/trends", rateLimit({ windowMs: 5 * 60 * 1000, maxRequests: 10 }), 
     if (sortedTrends.length > 0) {
       return c.json({
         success: true,
-        source: "aggregated_search_timeline",
-        note: "基于搜索和时间线聚合的热门话题标签",
+        source: "aggregated_timeline",
+        note: "兼容模式：基于当前账号时间线聚合的热门话题标签",
         count: sortedTrends.length,
         data: sortedTrends,
       });
@@ -1144,71 +1055,56 @@ app.get("/api/trends", rateLimit({ windowMs: 5 * 60 * 1000, maxRequests: 10 }), 
   }
 });
 
-// 获取探索/热门内容 (Explore) - 频率限制：每分钟最多20次
+// 获取官方探索/热门内容 (Explore) - 频率限制：每分钟最多20次
 app.get("/api/explore", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async (c) => {
   try {
     const category = c.req.query("category") || "for-you";
-    const client = await xGuestClient();
+    const source = (c.req.query("source") || "official").trim().toLowerCase();
+    const count = boundedInt(c.req.query("count"), 20, 100);
 
-    // 获取探索页时间线
-    const resp = await client.getTweetApi().getHomeLatestTimeline({
-      count: 50,
-    });
+    if (!["official", "timeline", "home"].includes(source)) {
+      return c.json({
+        success: false,
+        error: `Unsupported Explore source: ${source}`,
+        supportedSources: ["official", "timeline"],
+      }, 400);
+    }
 
-    const tweets = resp.data.data
-      .filter((tweet) => !tweet.referenced_tweets || tweet.referenced_tweets.length === 0)
-      .slice(0, 20)
-      .map((tweet) => {
-        const fullText = get(tweet, "raw.result.legacy.fullText", "");
-        const mediaItems = get(tweet, "raw.result.legacy.extendedEntities.media", []);
-
-        // 提取话题标签
-        const hashtags = get(tweet, "raw.result.legacy.entities.hashtags", [])
-          .map((h: any) => h.text)
-          .filter(Boolean);
-
-        return {
-          id: get(tweet, "raw.result.legacy.idStr"),
-          text: fullText,
-          createdAt: get(tweet, "raw.result.legacy.createdAt"),
-          hashtags,
-          user: {
-            screenName: get(tweet, "user.legacy.screenName"),
-            name: get(tweet, "user.legacy.name"),
-            avatar: get(tweet, "user.legacy.profileImageUrlHttps"),
-            followersCount: get(tweet, "user.legacy.followersCount"),
-            verified: get(tweet, "user.legacy.verified"),
-          },
-          stats: {
-            likes: get(tweet, "raw.result.legacy.favoriteCount"),
-            retweets: get(tweet, "raw.result.legacy.retweetCount"),
-            replies: get(tweet, "raw.result.legacy.replyCount"),
-            quotes: get(tweet, "raw.result.legacy.quoteCount"),
-          },
-          media: {
-            images: mediaItems
-              .filter((media: any) => media.type === "photo")
-              .map((media: any) => media.mediaUrlHttps),
-            videos: mediaItems
-              .filter((media: any) => media.type === "video" || media.type === "animated_gif")
-              .map((media: any) => {
-                const variants = get(media, "videoInfo.variants", []);
-                const bestQuality = variants
-                  .filter((v: any) => v.contentType === "video/mp4")
-                  .sort((a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-                return bestQuality?.url;
-              })
-              .filter(Boolean),
-          },
-          url: `https://x.com/${get(tweet, "user.legacy.screenName")}/status/${get(tweet, "raw.result.legacy.idStr")}`,
-        };
+    if (source === "timeline" || source === "home") {
+      const tweets = (await fetchHomeTimeline(count)).slice(0, count);
+      return c.json({
+        success: true,
+        source: "timeline",
+        category: "home",
+        count: tweets.length,
+        data: tweets,
       });
+    }
+
+    let result;
+    try {
+      result = await fetchOfficialExplore(category);
+    } catch (error: any) {
+      if (String(error.message).startsWith("Unsupported Explore category:")) {
+        return c.json({
+          success: false,
+          error: error.message,
+          categoriesUrl: "/api/explore/categories",
+        }, 400);
+      }
+      throw error;
+    }
+    const trends = result.trends.slice(0, count);
+    const tweets = result.tweets.slice(0, count);
 
     return c.json({
       success: true,
-      category,
-      count: tweets.length,
-      data: tweets,
+      source: "official_explore",
+      category: result.category,
+      availableCategories: result.categories,
+      count: trends.length + tweets.length,
+      counts: { trends: trends.length, tweets: tweets.length },
+      data: { trends, tweets },
     });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -1219,40 +1115,14 @@ app.get("/api/explore", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), asy
 app.get("/api/user/:username", rateLimit({ windowMs: 60 * 1000, maxRequests: 20 }), async (c) => {
   try {
     const username = c.req.param("username");
-    const client = await xGuestClient();
-
-    const resp = await client.getUserApi().getUserByScreenName({
-      screenName: username,
-    });
-
-    const user = resp.data.user;
+    const user = mapRawUser(await fetchRawUser(username));
     if (!user) {
       return c.json({ success: false, error: "User not found" }, 404);
     }
 
-    const legacy = get(user, "legacy", {});
-
     return c.json({
       success: true,
-      data: {
-        id: user.restId,
-        screenName: legacy.screenName,
-        name: legacy.name,
-        description: legacy.description,
-        location: legacy.location,
-        avatar: legacy.profileImageUrlHttps,
-        banner: legacy.profileBannerUrl,
-        verified: legacy.verified,
-        blueVerified: legacy.isBlueVerified,
-        stats: {
-          followers: legacy.followersCount,
-          following: legacy.friendsCount,
-          tweets: legacy.statusesCount,
-          listed: legacy.listedCount,
-        },
-        createdAt: legacy.createdAt,
-        url: `https://x.com/${legacy.screenName}`,
-      },
+      data: user,
     });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);

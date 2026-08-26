@@ -6,6 +6,8 @@ X (Twitter) 数据获取 API 服务，支持 Docker 部署。
 
 - 🔥 获取关注列表推文 (Timeline)
 - 🔍 搜索推文
+- 🌍 官方 Explore 热搜与完整地区切换
+- 📰 Explore 新闻、体育、娱乐等动态分类
 - 👤 获取指定用户信息
 - 📝 获取指定用户推文
 
@@ -33,6 +35,8 @@ bun run dev
 
 ## API 文档
 
+完整的参数、响应结构、官方分类列表和地区切换说明见 [API.md](./API.md)。
+
 ### 健康检查
 ```
 GET /health
@@ -46,41 +50,15 @@ GET /api/timeline?count=20
 
 ### 获取趋势话题 (Trending Topics)
 ```
-GET /api/trends
+GET /api/trends?region=worldwide&count=20
 ```
-从搜索和时间线中聚合热门话题标签，按出现频率排序。
-
-**说明：**
-- 搜索热门关键词（news, breaking, trending等）收集话题
-- 从你关注用户的时间线中提取话题标签
-- 聚合后返回出现频率最高的标签
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "source": "aggregated_search_timeline",
-  "count": 10,
-  "data": [
-    {
-      "name": "话题",
-      "displayName": "#话题",
-      "count": 5,
-      "url": "https://x.com/search?q=%23话题",
-      "directLink": "https://x.com/hashtag/话题",
-      "sampleTweet": {...}
-    }
-  ]
-}
-```
-
-**注意：** 这与 x.com/explore 的官方趋势话题可能不同，是基于你关注内容的个性化趋势。
+默认返回当前账号的官方 Explore Trending；传 `region` 或 `woeid` 可切换到指定地区。完整地区目录：`GET /api/trend-locations`。旧版时间线聚合仍可通过 `source=timeline` 使用。
 
 ### 获取探索/热门内容
 ```
 GET /api/explore?category=for-you
 ```
-获取推荐的热门推文内容。
+支持官方动态分类，当前常见值为 `for-you`、`trending`、`news`、`sports`、`entertainment`。可用分类请调用 `GET /api/explore/categories`。
 
 ### 搜索推文
 ```
@@ -98,6 +76,19 @@ GET /api/user/:username
 ```
 GET /api/user/:username/tweets?count=20
 ```
+
+### 获取推文详情和回复
+```
+GET /api/tweet?id=:tweetId
+GET /api/tweet?url=:tweetUrl
+```
+
+### 获取 X Article / 长文内容
+```
+GET /api/article?id=:tweetOrArticleId
+GET /api/article?url=:tweetOrArticleUrl
+```
+支持从发布文章的推文链接解析实际 Article ID，并返回标题、摘要、正文和关联推文。
 
 ### 获取推荐博主列表
 ```
