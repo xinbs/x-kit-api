@@ -16,6 +16,7 @@ import {
   fetchUserTweets,
   mapRawUser,
   mapRawTweets,
+  mapAdaptiveTweet,
   resolveTrendLocation,
 } from "./x-api";
 import { errorCheck } from "twitter-openapi-typescript/dist/src/utils/api";
@@ -231,30 +232,6 @@ app.get("/api/search", rateLimit({ windowMs: searchRateWindowMs, maxRequests: se
     }
 
     const authToken = process.env.AUTH_TOKEN?.trim();
-    const mapAdaptiveTweet = (tweet: any, user: any) => {
-      const mediaItems = tweet?.extended_entities?.media || [];
-      return {
-        id: tweet?.id_str,
-        text: tweet?.full_text || tweet?.text || "",
-        createdAt: tweet?.created_at,
-        user: {
-          screenName: user?.screen_name,
-          name: user?.name,
-          avatar: user?.profile_image_url_https,
-          followersCount: user?.followers_count,
-        },
-        stats: {
-          likes: tweet?.favorite_count,
-          retweets: tweet?.retweet_count,
-        },
-        media: {
-          images: mediaItems
-            .filter((media: any) => media.type === "photo")
-            .map((media: any) => media.media_url_https || media.media_url),
-        },
-        url: user?.screen_name ? `https://x.com/${user.screen_name}/status/${tweet?.id_str}` : undefined,
-      };
-    };
 
     const explicitCookie = process.env.X_COOKIE?.trim();
     const guestToken = process.env.GET_ID_X_TOKEN?.trim();

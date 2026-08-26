@@ -1,4 +1,5 @@
 import axios from "axios";
+import { postProvenance, protectedStatus } from "./post-provenance";
 import { getApiHeaders, getAuthCookies, getOpenApiFlag, getTransactionId } from "./utils";
 
 type GraphqlOptions = {
@@ -165,6 +166,7 @@ export const mapRawTweet = (rawResult: any) => {
       friendsCount: userLegacy.friends_count ?? userLegacy.friendsCount,
       verified: userResult?.verification?.verified ?? userLegacy.verified,
       blueVerified: userResult?.is_blue_verified ?? userResult?.isBlueVerified,
+      protected: protectedStatus(userResult),
     },
     stats: {
       likes: legacy.favorite_count ?? legacy.favoriteCount ?? 0,
@@ -181,6 +183,7 @@ export const mapRawTweet = (rawResult: any) => {
     url: id ? `https://x.com/${screenName || "i"}/status/${id}` : undefined,
     isRetweet: Boolean(legacy.retweeted_status_result || legacy.retweetedStatusResult),
     isQuote: Boolean(legacy.is_quote_status ?? legacy.isQuoteStatus),
+    ...postProvenance(result),
   };
 };
 
@@ -216,6 +219,7 @@ export const mapRawUser = (rawResult: any) => {
     banner: legacy.profile_banner_url || legacy.profileBannerUrl,
     verified: result?.verification?.verified ?? legacy.verified,
     blueVerified: result.is_blue_verified ?? result.isBlueVerified,
+    protected: protectedStatus(result),
     stats: {
       followers: legacy.followers_count ?? legacy.followersCount ?? 0,
       following: legacy.friends_count ?? legacy.friendsCount ?? 0,
@@ -226,6 +230,13 @@ export const mapRawUser = (rawResult: any) => {
     url: screenName ? `https://x.com/${screenName}` : undefined,
   };
 };
+
+// Search's adaptive fallback must retain the same privacy/provenance contract.
+export const mapAdaptiveTweet = (tweet: any, user: any) => mapRawTweet({
+  rest_id: tweet?.id_str,
+  legacy: { ...tweet, full_text: tweet?.full_text || tweet?.text || "" },
+  core: { user_results: { result: { rest_id: user?.id_str, legacy: user } } },
+});
 
 export const fetchRawUser = async (username: string, token?: string) => {
   const data = await requestXGraphql(

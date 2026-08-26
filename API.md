@@ -275,3 +275,16 @@ curl "http://localhost:3000/api/recommends/tweets?count=5&maxPerUser=3"
 - `/api/trends` 不带地区时以及 `/api/explore` 的结果会受到该账号的地区、语言、关注关系和个性化设置影响。
 - X 的内部 Web API、分类和地点目录可能调整；客户端应读取本服务返回的动态目录，不要硬编码全部可选项。
 - `AUTH_TOKEN`、Cookie 和 CSRF 信息不会出现在正常业务响应中，不应写入日志或提交到版本库。
+
+### Public-post provenance (additive, 2026-08-26)
+
+Timeline, GraphQL search, adaptive search fallback, profile posts and tweet detail retain all existing fields. Each post additionally includes:
+
+- `user.protected`: explicit boolean, or `null` when upstream privacy is unknown. A `true` value wins conflicting upstream fields. `/api/user/:username` also returns `protected`.
+- `isReply`, `inReplyToStatusId`, `quotedStatusId`, `retweetedStatusId`: reference IDs without copying referenced private bodies.
+- `urls`: up to 20 distinct `{url, expandedUrl, displayUrl}` objects. Only HTTP(S), no embedded credentials; this metadata does not authorize a downstream URL fetch.
+- `possiblySensitive`, `restrictedAudience`: known upstream safety/audience flags. Downstream public news ingestion must exclude protected/unknown users and restricted posts.
+
+`/api/timeline` currently uses `HomeLatestTimeline` (Following); it is not a For You recommendation endpoint. Authentication cookies remain internal to this service and are not part of this contract.
+
+Run the offline regression suite with `bun test`; tests use synthetic fixtures, do not read production cookies, and do not call X.
